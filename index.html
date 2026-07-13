@@ -171,7 +171,7 @@
     <canvas id="hiddenCanvas1"></canvas>
     <canvas id="hiddenCanvas2"></canvas>
 
-    <script>
+    <script {nonce}>
         const fileInput = document.getElementById('fileInput');
         const singleFileInput = document.getElementById('singleFileInput');
         const previewContainer = document.getElementById('previewContainer');
@@ -193,3 +193,173 @@
             onStart: function() {
                 isDragging = true;  
             },
+            onEnd: function () {
+                isDragging = false; 
+                updateBadgesAndGenerate();
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            let files = Array.from(e.target.files);
+            
+            if (files.length < 5) {
+                alert('写真は5枚以上選択してください。');
+                fileInput.value = '';
+                previewContainer.innerHTML = '';
+                resultGroup.style.display = 'none';
+                return;
+            }
+
+            if (files.length > 5) {
+                files = files.slice(0, 5);
+            }
+
+            previewContainer.innerHTML = '';
+            let loadedCount = 0;
+
+            files.forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        loadedCount++;
+                        if (loadedCount === 5) {
+                            resultGroup.style.display = 'block';
+                            generateLayouts();
+                        }
+                    };
+                    img.src = event.target.result;
+
+                    createPreviewItem(img, event.target.result);
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+
+        function createPreviewItem(imgObject, srcData) {
+            const item = document.createElement('div');
+            item.className = 'preview-item';
+            item.imageRef = imgObject;
+
+            item.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            const previewImg = document.createElement('img');
+            previewImg.src = srcData;
+
+            const badge = document.createElement('div');
+            badge.className = 'badge';
+
+            item.appendChild(previewImg);
+            item.appendChild(badge);
+            
+            item.addEventListener('click', () => {
+                if (!isDragging) {
+                    currentReplacingItem = item;
+                    singleFileInput.click();
+                }
+            });
+
+            previewContainer.appendChild(item);
+            updateBadges();
+        }
+
+        singleFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file || !currentReplacingItem) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    currentReplacingItem.querySelector('img').src = event.target.result;
+                    currentReplacingItem.imageRef = img;
+                    generateLayouts();
+                    currentReplacingItem = null;
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+            singleFileInput.value = '';
+        });
+
+        function updateBadges() {
+            const items = previewContainer.querySelectorAll('.preview-item');
+            const markers = ['①', '②', '③', '④', '⑤'];
+            items.forEach((item, idx) => {
+                const badge = item.querySelector('.badge');
+                if (badge) badge.textContent = markers[idx];
+            });
+        }
+
+        function updateBadgesAndGenerate() {
+            updateBadges();
+            generateLayouts();
+        }
+
+        function generateLayouts() {
+            const items = previewContainer.querySelectorAll('.preview-item');
+            const sortedImages = Array.from(items).map(item => item.imageRef);
+
+            if (sortedImages.length !== 5 || sortedImages.includes(undefined)) return;
+
+            // 【X特化型ハックサイズ】
+            // 左右4:3（1600x1200）を維持し、中央を6:7.1（1014x1200）にするため横幅を4214pxに拡張
+            const canvasWidth = 4214;
+            const canvasHeight = 1200;
+            
+            const sideWidth = 1600;    // 完璧な4:3（1600÷1200 = 1.333）
+            const centerWidth = 1014;  // 完璧な6:7.1（1014÷1200 = 0.845）
+
+            canvas1.width = canvasWidth; canvas1.height = canvasHeight;
+            canvas2.width = canvasWidth; canvas2.height = canvasHeight;
+
+            const ctx1 = canvas1.getContext('2d');
+            const ctx2 = canvas2.getContext('2d');
+
+            function drawCover(ctx, img, dx, dy, dWidth, dHeight) {
+                const imgRatio = img.width / img.height;
+                const destRatio = dWidth / dHeight;
+                let sx, sy, sWidth, sHeight;
+                if (imgRatio > destRatio) {
+                    sHeight = img.height; sWidth = img.height * destRatio;
+                    sx = (img.width - sWidth) / 2; sy = 0;
+                } else {
+                    sWidth = img.width; sHeight = img.width / targetRatio; // 安全策
+                    if(isNaN(sWidth)) {
+                        sWidth = img.width; sHeight = img.width / destRatio;
+                    }
+                    sx = 0; sy = (img.height - sHeight) / 2;
+                }
+                ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight);
+            }
+
+            function drawHalfCenter(ctx, img, dx, dy, dWidth, dHeight, isLeftHalf) {
+                // 中央画像の本来の1枚分の比率（2枚を合わせた元の比率）
+                const targetRatio = (centerWidth * 2) / canvasHeight; 
+                let sx, sy, sWidth, sHeight;
+                if ((img.width / img.height) > targetRatio) {
+                    sHeight = img.height; sWidth = img.height * targetRatio;
+                    sx = (img.width - sWidth) / 2; sy = 0;
+                } else {
+                    sWidth = img.width; sHeight = img.width / targetRatio;
+                    sx = 0; sy = (img.height - sHeight) / 2;
+                }
+                const halfWidth = sWidth / 2;
+                const finalSx = isLeftHalf ? sx : sx + halfWidth;
+                ctx.drawImage(img, finalSx, sy, halfWidth, sHeight, dx, dy, dWidth, dHeight);
+            }
+
+            drawCover(ctx1, sortedImages[0], 0, 0, sideWidth, canvasHeight);
+            drawHalfCenter(ctx1, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, true);
+            drawCover(ctx1, sortedImages[2], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
+
+            drawCover(ctx2, sortedImages[3], 0, 0, sideWidth, canvasHeight);
+            drawHalfCenter(ctx2, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, false);
+            drawCover(ctx2, sortedImages[4], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
+
+            outputImg1.src = canvas1.toDataURL('image/jpeg', 0.95);
+            outputImg2.src = canvas2.toDataURL('image/jpeg', 0.95);
+        }
+    </script>
+</body>
+</html>
