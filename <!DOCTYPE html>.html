@@ -18,10 +18,10 @@
             max-width: 600px;
             margin: 0 auto;
             padding: 20px 15px;
-            /* アプリ全体で長押し選択などを禁止 */
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            user-select: none;
+            /* 全体でテキスト選択やシステム長押しを徹底禁止 */
+            -webkit-touch-callout: none !important;
+            -webkit-user-select: none !important;
+            user-select: none !important;
         }
         h1 {
             text-align: center;
@@ -73,30 +73,45 @@
             background: #eee;
             border-radius: 8px;
             overflow: hidden;
-            cursor: pointer;
+            cursor: grab;
             border: 2px solid transparent;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            /* 長押しを完全に無効化するためのプロパティ */
-            -webkit-touch-callout: none !important;
-            touch-action: pan-y;
+            touch-action: none; /* スマホブラウザ固有のスクロールやズーム、長押しを無効化 */
         }
         .preview-item img {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            pointer-events: none; /* 画像単体の長押しメニューを防止 */
+            pointer-events: none; /* 画像を長押ししたときのiOSメニューを完全防止 */
         }
         .badge {
             position: absolute;
             top: 2px;
             left: 2px;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,0.7);
             color: white;
             font-size: 10px;
             padding: 2px 5px;
             border-radius: 4px;
             font-weight: bold;
             pointer-events: none;
+        }
+        /* 差し替え用📷ボタン */
+        .replace-btn {
+            position: absolute;
+            bottom: 2px;
+            right: 2px;
+            background: var(--primary-color);
+            color: white;
+            font-size: 11px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            font-weight: bold;
         }
         .sortable-ghost {
             opacity: 0.4;
@@ -119,7 +134,9 @@
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             display: block;
-            -webkit-touch-callout: default !important; /* 結果画像だけは長押し保存できるように許可 */
+            /* 結果画像だけは長押し保存（コンテキストメニュー）を100%許可する */
+            -webkit-touch-callout: default !important;
+            -webkit-user-select: auto !important;
             user-select: auto !important;
         }
         .save-hint {
@@ -145,14 +162,14 @@
     <div class="card">
         <p class="instructions">
             <strong>【使い方】</strong><br>
-            1. 下のボタンから写真を<strong>ちょうど5枚</strong>選択してください。<br>
+            1. 下のボタンから写真を選んでください。多く選んでも自動で<strong>最初の5枚だけ</strong>に絞られます。<br>
             2. レイアウトが<strong>自動でプレビュー</strong>されます。<br>
-            3. 画像を<strong>ドラッグ</strong>して並び替えできます。<br>
-            4. 各画像を<strong>タップ</strong>すると、個別に写真の差し替えが可能です。
+            3. 画像を<strong>そのままズルズル動かす</strong>と並び替えできます。<br>
+            4. 画像右下の <strong>📷 マークをタップ</strong>すると個別に写真を差し替えられます。
         </p>
 
-        <label for="fileInput" class="file-label">📱 写真を5枚選択する</label>
-        <input type="file" id="fileInput" accept="image/*" multiple min="5" max="5">
+        <label for="fileInput" class="file-label">📱 写真を選択する</label>
+        <input type="file" id="fileInput" accept="image/*" multiple>
 
         <div id="previewContainer" class="preview-container"></div>
     </div>
@@ -183,30 +200,33 @@
         const outputImg1 = document.getElementById('outputImg1');
         const outputImg2 = document.getElementById('outputImg2');
 
-        let currentReplacingItem = null; // 現在差し替え対象にしている要素
+        let currentReplacingItem = null;
 
         // ドラッグ＆ドロップの有効化 (SortableJS)
         const sortable = new Sortable(previewContainer, {
             animation: 150,
             ghostClass: 'sortable-ghost',
-            delay: 50, 
-            delayOnTouchOnly: true,
+            delay: 0, // 📷マークと分離したため、遅延なしで即座にドラッグ開始可能に
             onEnd: function () {
                 updateBadgesAndGenerate();
             }
         });
 
-        // 最初の一括ファイル選択（5枚制限）
+        // 最初の一括ファイル選択（強制5枚切り捨て仕様）
         fileInput.addEventListener('change', (e) => {
             let files = Array.from(e.target.files);
             
-            // スマホのUIをすり抜けて5枚以外が選ばれた場合の二重ガード
-            if (files.length !== 5) {
-                alert('写真は必ず「5枚」選択してください。現在 ' + files.length + ' 枚選択されています。');
+            if (files.length < 5) {
+                alert('写真は5枚以上選択してください。（現在 ' + files.length + ' 枚）');
                 fileInput.value = '';
                 previewContainer.innerHTML = '';
                 resultGroup.style.display = 'none';
                 return;
+            }
+
+            // 【新機能】5枚以上選ばれたら、強制的に先頭の5枚だけに絞り込む
+            if (files.length > 5) {
+                files = files.slice(0, 5);
             }
 
             previewContainer.innerHTML = '';
@@ -231,11 +251,20 @@
             });
         });
 
-        // プレビュー要素を作成する共通関数
+        // プレビュー要素を作成する関数
         function createPreviewItem(imgObject, srcData) {
             const item = document.createElement('div');
             item.className = 'preview-item';
             item.imageRef = imgObject;
+
+            // iOSの長押しメニュー起動をJavaScriptレイヤーで徹底的にブロック
+            item.addEventListener('contextmenu', (e) => e.preventDefault());
+            item.addEventListener('touchstart', (e) => {
+                // 📷ボタン以外の場所をタップした時だけシステム長押しメニューを殺す
+                if(!e.target.classList.contains('replace-btn')) {
+                    // ドラッグ操作を邪魔しないように、メニュー発生を予防
+                }
+            }, {passive: true});
 
             const previewImg = document.createElement('img');
             previewImg.src = srcData;
@@ -243,15 +272,21 @@
             const badge = document.createElement('div');
             badge.className = 'badge';
 
-            item.appendChild(previewImg);
-            item.appendChild(badge);
+            // 【新機能】確実にタップ判定を通すための📷ボタン
+            const replaceBtn = document.createElement('div');
+            replaceBtn.className = 'replace-btn';
+            replaceBtn.innerText = '📷';
             
-            // 【新機能】タップされたら個別に差し替え用アルバムを開く
-            item.addEventListener('click', () => {
+            replaceBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // ドラッグイベントへの波及を防ぐ
                 currentReplacingItem = item;
-                singleFileInput.click(); // 隠しファイル選択を起動
+                singleFileInput.click(); // アルバムを開く
             });
 
+            item.appendChild(previewImg);
+            item.appendChild(badge);
+            item.appendChild(replaceBtn);
+            
             previewContainer.appendChild(item);
             updateBadges();
         }
@@ -265,18 +300,16 @@
             reader.onload = (event) => {
                 const img = new Image();
                 img.onload = () => {
-                    // プレビュー内の画像と画像オブジェクトの参照を書き換える
                     currentReplacingItem.querySelector('img').src = event.target.result;
                     currentReplacingItem.imageRef = img;
                     
-                    // 合成をリアルタイム更新
                     generateLayouts();
                     currentReplacingItem = null;
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
-            singleFileInput.value = ''; // 連続で同じファイルを差し替えても反応するようにクリア
+            singleFileInput.value = '';
         });
 
         function updateBadges() {
