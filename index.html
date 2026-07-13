@@ -18,7 +18,6 @@
             max-width: 600px;
             margin: 0 auto;
             padding: 20px 15px;
-            /* 全体でテキスト選択やシステムの変な反応を防止 */
             -webkit-user-select: none !important;
             user-select: none !important;
         }
@@ -59,7 +58,6 @@
         #fileInput, .single-file-input {
             display: none;
         }
-        /* プレビューエリア */
         .preview-container {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
@@ -75,8 +73,6 @@
             cursor: grab;
             border: 2px solid transparent;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            
-            /* スマホの標準長押しメニュー（コピーや保存）のポップアップを徹底防止 */
             -webkit-touch-callout: none !important;
             touch-action: none; 
         }
@@ -87,7 +83,7 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            pointer-events: none; /* 画像の上での長押し反応を防止 */
+            pointer-events: none;
         }
         .badge {
             position: absolute;
@@ -101,12 +97,10 @@
             font-weight: bold;
             pointer-events: none;
         }
-        /* 並び替え中のプレースホルダー（半透明の点線枠） */
         .sortable-ghost {
             opacity: 0.4;
             border: 2px dashed var(--primary-color);
         }
-        /* 結果エリアのスタイル */
         .result-group {
             display: none;
             margin-top: 25px;
@@ -123,7 +117,6 @@
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             display: block;
-            /* 合成後の結果画像だけは、長押し保存メニューを100%許可 */
             -webkit-touch-callout: default !important;
             -webkit-user-select: auto !important;
             user-select: auto !important;
@@ -154,8 +147,8 @@
             1. 下のボタンから写真を<strong>5枚まとめて</strong>選択してください。<br>
             ※多く選んでも自動で最初の5枚だけに絞られます。<br>
             2. レイアウトが<strong>自動でプレビュー</strong>されます。<br>
-            3. 画像を<strong>【少し長押し（0.2秒）】しながらズルズル動かす</strong>と、位置を入れ替えられます！<br>
-            4. 画像を<strong>ポンと短くタップ</strong>すると、その1枚だけを個別に入れ替えられます。
+            3. 画像を<strong>長押ししながら動かす</strong>と、位置を入れ替えられます！<br>
+            4. 画像を<strong>タップ</strong>すると、その1枚だけを個別に入れ替えられます。
         </p>
 
         <label for="fileInput" class="file-label">📱 写真を5枚選択する</label>
@@ -191,26 +184,43 @@
         const outputImg2 = document.getElementById('outputImg2');
 
         let currentReplacingItem = null;
-        let isDragging = false; // ドラッグ中かどうかの判定用フラグ
+        let preventClickFlag = false; // ドラッグ操作時の誤タップ防止用フラグ
 
-        // 【大改良】スマホ対応のドラッグ＆ドロップ設定 (SortableJS)
+        // SortableJSの設定
         const sortable = new Sortable(previewContainer, {
             animation: 150,
             ghostClass: 'sortable-ghost',
-            delay: 200,             // スマホで0.2秒押しっぱなしにするとドラッグが発動（誤作動防止）
-            delayOnTouchOnly: true, // スマホ（タッチ操作）のときだけこの遅延を有効にする
+            delay: 200,             
+            delayOnTouchOnly: true, 
             onStart: function() {
-                isDragging = true;  // ドラッグが始まったらフラグを立てる
+                preventClickFlag = true; // ドラッグが始まったらクリックを無効化
             },
             onEnd: function () {
-                isDragging = false; // ドラッグが終わったらフラグを戻す
+                // 少し遅らせてクリックフラグを戻す
+                setTimeout(() => { preventClickFlag = false; }, 50);
                 updateBadgesAndGenerate();
             }
         });
 
-        // 最初の一括ファイル選択（強制5枚仕様）
-        fileInput.addEventListener('change', (e) => {
+        // 非同期ファイルを確実に順番通り読み込むためのPromiseヘルパー
+        function loadImageAsync(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => resolve({ img, src: event.target.result });
+                    img.onerror = () => reject();
+                    img.src = event.target.result;
+                };
+                reader.onerror = () => reject();
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // 5枚一括ファイル選択
+        fileInput.addEventListener('change', async (e) => {
             let files = Array.from(e.target.files);
+            if (files.length === 0) return;
             
             if (files.length < 5) {
                 alert('写真は5枚以上選択してください。（現在 ' + files.length + ' 枚）');
@@ -225,34 +235,30 @@
             }
 
             previewContainer.innerHTML = '';
-            let loadedCount = 0;
+            
+            try {
+                // 5枚すべての読み込み完了を完全に待機
+                const results = await Promise.all(files.map(file => loadImageAsync(file)));
+                
+                results.forEach(res => {
+                    createPreviewItem(res.img, res.src);
+                });
 
-            files.forEach((file, index) => {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        loadedCount++;
-                        if (loadedCount === 5) {
-                            resultGroup.style.display = 'block';
-                            generateLayouts();
-                        }
-                    };
-                    img.src = event.target.result;
+                resultGroup.style.display = 'block';
+                generateLayouts();
 
-                    createPreviewItem(img, event.target.result);
-                };
-                reader.readAsDataURL(file);
-            });
+            } catch (err) {
+                alert('画像の読み込みに失敗しました。もう一度お試しください。');
+            }
+            
+            fileInput.value = '';
         });
 
-        // プレビューの四角マスを作成する関数
         function createPreviewItem(imgObject, srcData) {
             const item = document.createElement('div');
             item.className = 'preview-item';
             item.imageRef = imgObject;
 
-            // iOSのコンテキストメニュー（長押しポップアップ）を完全に黙らせる
             item.addEventListener('contextmenu', (e) => e.preventDefault());
 
             const previewImg = document.createElement('img');
@@ -264,9 +270,9 @@
             item.appendChild(previewImg);
             item.appendChild(badge);
             
-            // 【ポイント】短くタップした時だけ差し替えアルバムを開く（ドラッグ中なら無視）
+            // フラグベースの確実なタップイベント制御
             item.addEventListener('click', () => {
-                if (!isDragging) {
+                if (!preventClickFlag) {
                     currentReplacingItem = item;
                     singleFileInput.click();
                 }
@@ -276,7 +282,7 @@
             updateBadges();
         }
 
-        // 個別の写真差し替え処理
+        // 個別の写真差し替え
         singleFileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file || !currentReplacingItem) return;
@@ -315,13 +321,14 @@
             const items = previewContainer.querySelectorAll('.preview-item');
             const sortedImages = Array.from(items).map(item => item.imageRef);
 
-            if (sortedImages.length !== 5 || sortedImages.includes(undefined)) return;
+            // 要素数のチェックと、破綻防止のバリデーション
+            if (sortedImages.length !== 5 || sortedImages.includes(undefined) || sortedImages.includes(null)) return;
 
-            // 3200 × 1200 の超高解像度
-            const canvasWidth = 3200;
+            // 比率の完全確定値
+            const canvasWidth = 3220;
             const canvasHeight = 1200;
-            const sideWidth = (canvasWidth * 4.5) / 16;
-            const centerWidth = (canvasWidth * 7) / 16;
+            const sideWidth = 900;     // 3:4 (縦長)
+            const centerWidth = 1420;  // 7.1:6 (横長分割の1枚分)
 
             canvas1.width = canvasWidth; canvas1.height = canvasHeight;
             canvas2.width = canvasWidth; canvas2.height = canvasHeight;
@@ -329,46 +336,67 @@
             const ctx1 = canvas1.getContext('2d');
             const ctx2 = canvas2.getContext('2d');
 
+            // 左右の 3:4 縦長写真用のトリミング
             function drawCover(ctx, img, dx, dy, dWidth, dHeight) {
+                if (!img || !img.width || !img.height) return;
                 const imgRatio = img.width / img.height;
                 const destRatio = dWidth / dHeight;
                 let sx, sy, sWidth, sHeight;
+
                 if (imgRatio > destRatio) {
-                    sHeight = img.height; sWidth = img.height * destRatio;
-                    sx = (img.width - sWidth) / 2; sy = 0;
+                    sHeight = img.height;
+                    sWidth = img.height * destRatio;
+                    sx = (img.width - sWidth) / 2;
+                    sy = 0;
                 } else {
-                    sWidth = img.width; sHeight = img.width / destRatio;
-                    sx = 0; sy = (img.height - sHeight) / 2;
+                    sWidth = img.width;
+                    sHeight = img.width / destRatio;
+                    sx = 0;
+                    sy = (img.height - sHeight) / 2;
                 }
                 ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight);
             }
 
+            // 中央の元・横長写真（②）を2枚分の総アスペクト比（2840x1200）でスライス
             function drawHalfCenter(ctx, img, dx, dy, dWidth, dHeight, isLeftHalf) {
-                const targetRatio = 4 / 1; 
+                if (!img || !img.width || !img.height) return;
+                const totalCenterRatio = (centerWidth * 2) / canvasHeight; 
                 let sx, sy, sWidth, sHeight;
-                if ((img.width / img.height) > targetRatio) {
-                    sHeight = img.height; sWidth = img.height * targetRatio;
-                    sx = (img.width - sWidth) / 2; sy = 0;
+
+                if ((img.width / img.height) > totalCenterRatio) {
+                    sHeight = img.height;
+                    sWidth = img.height * totalCenterRatio;
+                    sx = (img.width - sWidth) / 2;
+                    sy = 0;
                 } else {
-                    sWidth = img.width; sHeight = img.width / targetRatio;
-                    sx = 0; sy = (img.height - sHeight) / 2;
+                    sWidth = img.width;
+                    sHeight = img.width / totalCenterRatio;
+                    sx = 0;
+                    sy = (img.height - sHeight) / 2;
                 }
+
                 const halfWidth = sWidth / 2;
                 const finalSx = isLeftHalf ? sx : sx + halfWidth;
+
                 ctx.drawImage(img, finalSx, sy, halfWidth, sHeight, dx, dy, dWidth, dHeight);
             }
 
-            // 現在プレビューに並んでいる順番で合成
-            drawCover(ctx1, sortedImages[0], 0, 0, sideWidth, canvasHeight);
-            drawHalfCenter(ctx1, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, true);
-            drawCover(ctx1, sortedImages[2], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
+            try {
+                // 画像1 (①縦長 + ②の左半分 + ③縦長)
+                drawCover(ctx1, sortedImages[0], 0, 0, sideWidth, canvasHeight);
+                drawHalfCenter(ctx1, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, true);
+                drawCover(ctx1, sortedImages[2], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
 
-            drawCover(ctx2, sortedImages[3], 0, 0, sideWidth, canvasHeight);
-            drawHalfCenter(ctx2, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, false);
-            drawCover(ctx2, sortedImages[4], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
+                // 画像2 (④縦長 + ②の右半分 + ⑤縦長)
+                drawCover(ctx2, sortedImages[3], 0, 0, sideWidth, canvasHeight);
+                drawHalfCenter(ctx2, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, false);
+                drawCover(ctx2, sortedImages[4], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
 
-            outputImg1.src = canvas1.toDataURL('image/jpeg', 0.95);
-            outputImg2.src = canvas2.toDataURL('image/jpeg', 0.95);
+                outputImg1.src = canvas1.toDataURL('image/jpeg', 0.95);
+                outputImg2.src = canvas2.toDataURL('image/jpeg', 0.95);
+            } catch (e) {
+                console.error("Layout generation failed:", e);
+            }
         }
     </script>
 </body>
