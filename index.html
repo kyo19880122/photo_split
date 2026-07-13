@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Photo Split</title>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
         :root {
             --primary-color: #0071e3;
@@ -18,7 +17,7 @@
             max-width: 600px;
             margin: 0 auto;
             padding: 20px 15px;
-            /* 全体でテキスト選択やシステム長押しを徹底禁止 */
+            /* 全体でシステム長押しやテキスト選択を徹底禁止 */
             -webkit-touch-callout: none !important;
             -webkit-user-select: none !important;
             user-select: none !important;
@@ -73,49 +72,28 @@
             background: #eee;
             border-radius: 8px;
             overflow: hidden;
-            cursor: grab;
+            cursor: pointer;
             border: 2px solid transparent;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            touch-action: none; /* スマホブラウザ固有のスクロールやズーム、長押しを無効化 */
+            touch-action: manipulation;
         }
         .preview-item img {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            pointer-events: none; /* 画像を長押ししたときのiOSメニューを完全防止 */
+            pointer-events: none;
         }
         .badge {
             position: absolute;
             top: 2px;
             left: 2px;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.6);
             color: white;
             font-size: 10px;
             padding: 2px 5px;
             border-radius: 4px;
             font-weight: bold;
             pointer-events: none;
-        }
-        /* 差し替え用📷ボタン */
-        .replace-btn {
-            position: absolute;
-            bottom: 2px;
-            right: 2px;
-            background: var(--primary-color);
-            color: white;
-            font-size: 11px;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-            font-weight: bold;
-        }
-        .sortable-ghost {
-            opacity: 0.4;
-            border: 2px dashed var(--primary-color);
         }
         /* 結果エリアのスタイル */
         .result-group {
@@ -134,7 +112,7 @@
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             display: block;
-            /* 結果画像だけは長押し保存（コンテキストメニュー）を100%許可する */
+            /* 結果画像だけは長押し保存（コンテキストメニュー）を100%許可 */
             -webkit-touch-callout: default !important;
             -webkit-user-select: auto !important;
             user-select: auto !important;
@@ -162,13 +140,13 @@
     <div class="card">
         <p class="instructions">
             <strong>【使い方】</strong><br>
-            1. 下のボタンから写真を選んでください。多く選んでも自動で<strong>最初の5枚だけ</strong>に絞られます。<br>
+            1. 下のボタンから写真を<strong>5枚まとめて</strong>選択してください。<br>
+            ※多く選んでも自動で最初の5枚だけがセットされます。<br>
             2. レイアウトが<strong>自動でプレビュー</strong>されます。<br>
-            3. 画像を<strong>そのままズルズル動かす</strong>と並び替えできます。<br>
-            4. 画像右下の <strong>📷 マークをタップ</strong>すると個別に写真を差し替えられます。
+            3. 並び順を変えたい画像があれば、その写真を<strong>タップ</strong>すると、個別に入れ替えが可能です。
         </p>
 
-        <label for="fileInput" class="file-label">📱 写真を選択する</label>
+        <label for="fileInput" class="file-label">📱 写真を5枚選択する</label>
         <input type="file" id="fileInput" accept="image/*" multiple>
 
         <div id="previewContainer" class="preview-container"></div>
@@ -201,18 +179,8 @@
         const outputImg2 = document.getElementById('outputImg2');
 
         let currentReplacingItem = null;
+        let imagesArray = [];
 
-        // ドラッグ＆ドロップの有効化 (SortableJS)
-        const sortable = new Sortable(previewContainer, {
-            animation: 150,
-            ghostClass: 'sortable-ghost',
-            delay: 0, // 📷マークと分離したため、遅延なしで即座にドラッグ開始可能に
-            onEnd: function () {
-                updateBadgesAndGenerate();
-            }
-        });
-
-        // 最初の一括ファイル選択（強制5枚切り捨て仕様）
         fileInput.addEventListener('change', (e) => {
             let files = Array.from(e.target.files);
             
@@ -224,12 +192,12 @@
                 return;
             }
 
-            // 【新機能】5枚以上選ばれたら、強制的に先頭の5枚だけに絞り込む
             if (files.length > 5) {
                 files = files.slice(0, 5);
             }
 
             previewContainer.innerHTML = '';
+            imagesArray = new Array(5).fill(null);
             let loadedCount = 0;
 
             files.forEach((file, index) => {
@@ -237,6 +205,7 @@
                 reader.onload = (event) => {
                     const img = new Image();
                     img.onload = () => {
+                        imagesArray[index] = img;
                         loadedCount++;
                         if (loadedCount === 5) {
                             resultGroup.style.display = 'block';
@@ -245,26 +214,17 @@
                     };
                     img.src = event.target.result;
 
-                    createPreviewItem(img, event.target.result);
+                    createPreviewItem(index, event.target.result);
                 };
                 reader.readAsDataURL(file);
             });
         });
 
-        // プレビュー要素を作成する関数
-        function createPreviewItem(imgObject, srcData) {
+        function createPreviewItem(index, srcData) {
             const item = document.createElement('div');
             item.className = 'preview-item';
-            item.imageRef = imgObject;
-
-            // iOSの長押しメニュー起動をJavaScriptレイヤーで徹底的にブロック
+            item.dataset.index = index;
             item.addEventListener('contextmenu', (e) => e.preventDefault());
-            item.addEventListener('touchstart', (e) => {
-                // 📷ボタン以外の場所をタップした時だけシステム長押しメニューを殺す
-                if(!e.target.classList.contains('replace-btn')) {
-                    // ドラッグ操作を邪魔しないように、メニュー発生を予防
-                }
-            }, {passive: true});
 
             const previewImg = document.createElement('img');
             previewImg.src = srcData;
@@ -272,37 +232,29 @@
             const badge = document.createElement('div');
             badge.className = 'badge';
 
-            // 【新機能】確実にタップ判定を通すための📷ボタン
-            const replaceBtn = document.createElement('div');
-            replaceBtn.className = 'replace-btn';
-            replaceBtn.innerText = '📷';
-            
-            replaceBtn.addEventListener('click', (e) => {
-                e.stopPropagation(); // ドラッグイベントへの波及を防ぐ
-                currentReplacingItem = item;
-                singleFileInput.click(); // アルバムを開く
-            });
-
             item.appendChild(previewImg);
             item.appendChild(badge);
-            item.appendChild(replaceBtn);
             
+            item.addEventListener('click', () => {
+                currentReplacingItem = item;
+                singleFileInput.click();
+            });
+
             previewContainer.appendChild(item);
             updateBadges();
         }
 
-        // 単品差し替え処理
         singleFileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file || !currentReplacingItem) return;
 
+            const idx = parseInt(currentReplacingItem.dataset.index);
             const reader = new FileReader();
             reader.onload = (event) => {
                 const img = new Image();
                 img.onload = () => {
                     currentReplacingItem.querySelector('img').src = event.target.result;
-                    currentReplacingItem.imageRef = img;
-                    
+                    imagesArray[idx] = img;
                     generateLayouts();
                     currentReplacingItem = null;
                 };
@@ -321,21 +273,14 @@
             });
         }
 
-        function updateBadgesAndGenerate() {
-            updateBadges();
-            generateLayouts();
-        }
-
         function generateLayouts() {
-            const items = previewContainer.querySelectorAll('.preview-item');
-            const sortedImages = Array.from(items).map(item => item.imageRef);
+            if (imagesArray.length !== 5 || imagesArray.includes(null)) return;
 
-            if (sortedImages.length !== 5) return;
-
-            const canvasWidth = 1600;
-            const canvasHeight = 600;
-            const sideWidth = (canvasWidth * 4.5) / 16;
-            const centerWidth = (canvasWidth * 7) / 16;
+            // 【高解像度化】キャンバスサイズを 3200 × 1200 に変更
+            const canvasWidth = 3200;
+            const canvasHeight = 1200;
+            const sideWidth = (canvasWidth * 4.5) / 16;  // 900px
+            const centerWidth = (canvasWidth * 7) / 16;  // 1400px
 
             canvas1.width = canvasWidth; canvas1.height = canvasHeight;
             canvas2.width = canvasWidth; canvas2.height = canvasHeight;
@@ -372,14 +317,15 @@
                 ctx.drawImage(img, finalSx, sy, halfWidth, sHeight, dx, dy, dWidth, dHeight);
             }
 
-            drawCover(ctx1, sortedImages[0], 0, 0, sideWidth, canvasHeight);
-            drawHalfCenter(ctx1, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, true);
-            drawCover(ctx1, sortedImages[2], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
+            drawCover(ctx1, imagesArray[0], 0, 0, sideWidth, canvasHeight);
+            drawHalfCenter(ctx1, imagesArray[1], sideWidth, 0, centerWidth, canvasHeight, true);
+            drawCover(ctx1, imagesArray[2], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
 
-            drawCover(ctx2, sortedImages[3], 0, 0, sideWidth, canvasHeight);
-            drawHalfCenter(ctx2, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, false);
-            drawCover(ctx2, sortedImages[4], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
+            drawCover(ctx2, imagesArray[3], 0, 0, sideWidth, canvasHeight);
+            drawHalfCenter(ctx2, imagesArray[1], sideWidth, 0, centerWidth, canvasHeight, false);
+            drawCover(ctx2, imagesArray[4], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
 
+            // 高品質なJPEGとして書き出し
             outputImg1.src = canvas1.toDataURL('image/jpeg', 0.95);
             outputImg2.src = canvas2.toDataURL('image/jpeg', 0.95);
         }
