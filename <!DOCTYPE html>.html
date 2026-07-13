@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Photo Split</title>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
@@ -18,6 +18,10 @@
             max-width: 600px;
             margin: 0 auto;
             padding: 20px 15px;
+            /* アプリ全体で長押し選択などを禁止 */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
         h1 {
             text-align: center;
@@ -39,7 +43,6 @@
             margin-bottom: 15px;
             line-height: 1.5;
         }
-        /* ファイル選択ボタンのカスタム */
         .file-label {
             display: block;
             text-align: center;
@@ -50,15 +53,14 @@
             font-weight: bold;
             cursor: pointer;
             margin-bottom: 20px;
-            transition: background 0.2s;
         }
         .file-label:active {
             background-color: #d2d2d7;
         }
-        #fileInput {
+        #fileInput, .single-file-input {
             display: none;
         }
-        /* ドラッグ＆ドロップのプレビューエリア */
+        /* プレビューエリア */
         .preview-container {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
@@ -71,23 +73,18 @@
             background: #eee;
             border-radius: 8px;
             overflow: hidden;
-            cursor: grab;
+            cursor: pointer;
             border: 2px solid transparent;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            
-            /* スマホで長押ししたときのシステムメニュー（保存・共有など）を禁止 */
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-        .preview-item:active {
-            cursor: grabbing;
+            /* 長押しを完全に無効化するためのプロパティ */
+            -webkit-touch-callout: none !important;
+            touch-action: pan-y;
         }
         .preview-item img {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            pointer-events: none; /* 画像単体へのロングタップイベントを無効化 */
+            pointer-events: none; /* 画像単体の長押しメニューを防止 */
         }
         .badge {
             position: absolute;
@@ -101,7 +98,6 @@
             font-weight: bold;
             pointer-events: none;
         }
-        /* 並び替え中のプレースホルダー */
         .sortable-ghost {
             opacity: 0.4;
             border: 2px dashed var(--primary-color);
@@ -123,26 +119,19 @@
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             display: block;
+            -webkit-touch-callout: default !important; /* 結果画像だけは長押し保存できるように許可 */
+            user-select: auto !important;
         }
-        .btn {
-            display: block;
-            width: 100%;
-            padding: 14px;
-            background-color: var(--success-color);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            cursor: pointer;
+        .save-hint {
+            text-align: center;
+            font-size: 13px;
+            color: var(--primary-color);
             font-weight: bold;
             margin-top: 8px;
-            margin-bottom: 20px;
-            transition: opacity 0.2s;
-            text-align: center;
-            text-decoration: none;
-        }
-        .btn:active {
-            opacity: 0.8;
+            margin-bottom: 25px;
+            background: #e1f0ff;
+            padding: 10px;
+            border-radius: 8px;
         }
         #hiddenCanvas1, #hiddenCanvas2 {
             display: none;
@@ -158,11 +147,12 @@
             <strong>【使い方】</strong><br>
             1. 下のボタンから写真を<strong>ちょうど5枚</strong>選択してください。<br>
             2. レイアウトが<strong>自動でプレビュー</strong>されます。<br>
-            3. 画像を<strong>長押し＆ドラッグ</strong>して入れ替えると、プレビューも<strong>リアルタイムで更新</strong>されます。
+            3. 画像を<strong>ドラッグ</strong>して並び替えできます。<br>
+            4. 各画像を<strong>タップ</strong>すると、個別に写真の差し替えが可能です。
         </p>
 
         <label for="fileInput" class="file-label">📱 写真を5枚選択する</label>
-        <input type="file" id="fileInput" accept="image/*" multiple>
+        <input type="file" id="fileInput" accept="image/*" multiple min="5" max="5">
 
         <div id="previewContainer" class="preview-container"></div>
     </div>
@@ -170,18 +160,21 @@
     <div id="resultGroup" class="result-group">
         <div class="result-title">画像 1 (① + ②左半分 + ③)</div>
         <img id="outputImg1" class="output-img" alt="出力画像1">
-        <a id="downloadBtn1" class="btn">画像を保存する (1枚目)</a>
+        <div class="save-hint">☝️上の画像を長押しして「"写真"に保存」</div>
 
         <div class="result-title">画像 2 (④ + ②右半分 + ⑤)</div>
         <img id="outputImg2" class="output-img" alt="出力画像2">
-        <a id="downloadBtn2" class="btn">画像を保存する (2枚目)</a>
+        <div class="save-hint">☝️上の画像を長押しして「"写真"に保存」</div>
     </div>
+
+    <input type="file" id="singleFileInput" class="single-file-input" accept="image/*">
 
     <canvas id="hiddenCanvas1"></canvas>
     <canvas id="hiddenCanvas2"></canvas>
 
     <script>
         const fileInput = document.getElementById('fileInput');
+        const singleFileInput = document.getElementById('singleFileInput');
         const previewContainer = document.getElementById('previewContainer');
         const resultGroup = document.getElementById('resultGroup');
         
@@ -190,25 +183,27 @@
         const outputImg1 = document.getElementById('outputImg1');
         const outputImg2 = document.getElementById('outputImg2');
 
+        let currentReplacingItem = null; // 現在差し替え対象にしている要素
+
         // ドラッグ＆ドロップの有効化 (SortableJS)
         const sortable = new Sortable(previewContainer, {
             animation: 150,
             ghostClass: 'sortable-ghost',
-            delay: 150, // 長押し判定を少しだけ伸ばして誤作動防止(0.15秒)
+            delay: 50, 
             delayOnTouchOnly: true,
             onEnd: function () {
                 updateBadgesAndGenerate();
             }
         });
 
-        // ファイルが選択されたら自動プレビュー ➔ 自動生成
+        // 最初の一括ファイル選択（5枚制限）
         fileInput.addEventListener('change', (e) => {
-            const files = Array.from(e.target.files);
+            let files = Array.from(e.target.files);
             
-            // 5枚じゃない場合は選択を拒否してリセット
+            // スマホのUIをすり抜けて5枚以外が選ばれた場合の二重ガード
             if (files.length !== 5) {
-                alert('写真は必ず「5枚」選択してください。（現在 ' + files.length + ' 枚選択されています）');
-                fileInput.value = ''; // 選択クリア
+                alert('写真は必ず「5枚」選択してください。現在 ' + files.length + ' 枚選択されています。');
+                fileInput.value = '';
                 previewContainer.innerHTML = '';
                 resultGroup.style.display = 'none';
                 return;
@@ -230,26 +225,58 @@
                     };
                     img.src = event.target.result;
 
-                    const item = document.createElement('div');
-                    item.className = 'preview-item';
-                    item.imageRef = img;
-
-                    const previewImg = document.createElement('img');
-                    previewImg.src = event.target.result;
-
-                    const badge = document.createElement('div');
-                    badge.className = 'badge';
-
-                    item.appendChild(previewImg);
-                    item.appendChild(badge);
-                    previewContainer.appendChild(item);
-
-                    if (index === files.length - 1) {
-                        setTimeout(updateBadges, 50);
-                    }
+                    createPreviewItem(img, event.target.result);
                 };
                 reader.readAsDataURL(file);
             });
+        });
+
+        // プレビュー要素を作成する共通関数
+        function createPreviewItem(imgObject, srcData) {
+            const item = document.createElement('div');
+            item.className = 'preview-item';
+            item.imageRef = imgObject;
+
+            const previewImg = document.createElement('img');
+            previewImg.src = srcData;
+
+            const badge = document.createElement('div');
+            badge.className = 'badge';
+
+            item.appendChild(previewImg);
+            item.appendChild(badge);
+            
+            // 【新機能】タップされたら個別に差し替え用アルバムを開く
+            item.addEventListener('click', () => {
+                currentReplacingItem = item;
+                singleFileInput.click(); // 隠しファイル選択を起動
+            });
+
+            previewContainer.appendChild(item);
+            updateBadges();
+        }
+
+        // 単品差し替え処理
+        singleFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file || !currentReplacingItem) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    // プレビュー内の画像と画像オブジェクトの参照を書き換える
+                    currentReplacingItem.querySelector('img').src = event.target.result;
+                    currentReplacingItem.imageRef = img;
+                    
+                    // 合成をリアルタイム更新
+                    generateLayouts();
+                    currentReplacingItem = null;
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+            singleFileInput.value = ''; // 連続で同じファイルを差し替えても反応するようにクリア
         });
 
         function updateBadges() {
@@ -320,20 +347,8 @@
             drawHalfCenter(ctx2, sortedImages[1], sideWidth, 0, centerWidth, canvasHeight, false);
             drawCover(ctx2, sortedImages[4], sideWidth + centerWidth, 0, sideWidth, canvasHeight);
 
-            const dataUrl1 = canvas1.toDataURL('image/jpeg', 0.95);
-            const dataUrl2 = canvas2.toDataURL('image/jpeg', 0.95);
-
-            outputImg1.src = dataUrl1;
-            outputImg2.src = dataUrl2;
-
-            setupDownloadBtn('downloadBtn1', dataUrl1, 'PhotoSplit_1.jpg');
-            setupDownloadBtn('downloadBtn2', dataUrl2, 'PhotoSplit_2.jpg');
-        }
-
-        function setupDownloadBtn(btnId, dataUrl, filename) {
-            const btn = document.getElementById(btnId);
-            btn.href = dataUrl;
-            btn.download = filename;
+            outputImg1.src = canvas1.toDataURL('image/jpeg', 0.95);
+            outputImg2.src = canvas2.toDataURL('image/jpeg', 0.95);
         }
     </script>
 </body>
